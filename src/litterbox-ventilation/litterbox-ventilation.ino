@@ -15,11 +15,9 @@ SYSTEM_MODE(MANUAL);
 #define LED_STATUS_PIN D7
 #define BREAKBEAM_PIN D4
 #define FAN_PWM_PIN D5
-// SECONDARY_STATUS_LED_PIN is high whenever the fan should be online
-#define SECONDARY_STATUS_LED_PIN D6
 
 // how long to run the fan after the litterbox is not occupied for cleanup
-#define COOLDOWN_MS 60000
+#define COOLDOWN_MS 20000
 // failsafe for if we get into a strange state where the house is occupied forever. prevents fan from running
 // constantly
 #define FAN_ACTIVE_MAX_MS 300000
@@ -62,10 +60,52 @@ void fan_state_change(FanState s) {
 }
 
 void state_change(LitterboxState s) {
+  previous_state = state;
   if (state != s) {
     state_time_ms = millis();
   }
   state = s;
+}
+
+void print_state(String prefix) {
+  String house;
+  String oldhouse;
+  String ir;
+  String fan;
+  if (previous_state == HOUSE_STATE_VACANT){
+    oldhouse = "house_vacant";
+  } else if (previous_state == HOUSE_STATE_OCCUPIED){
+    oldhouse = "house_occupied";
+  } else {
+    oldhouse = "house_cooldown";
+  }
+  if (state == HOUSE_STATE_VACANT){
+    house = "house_vacant";
+  } else if (state == HOUSE_STATE_OCCUPIED){
+    house = "house_occupied";
+  } else {
+    house = "house_cooldown";
+  }
+  if (fan_state == FAN_STATE_ON){
+    fan = "fan_on";
+  } else if (fan_state == FAN_STATE_OFF){
+    fan = "fan_off";
+  } else {
+    fan = "fan_cooldown";
+  }
+
+  if (breakbeam_state == IR_STATE_BROKEN){
+    ir = "ir_broken";
+  } else {
+    ir = "ir_connected";
+  }
+
+  String t = "";
+  if (state != HOUSE_STATE_VACANT) {
+    t = String(millis()-state_time_ms);
+  }
+
+  Serial.println(prefix + ": " + house + "(" + oldhouse + ") | " + ir + " | " + fan + "  ---  " + t);
 }
 
 
@@ -73,14 +113,15 @@ void setup() {
   reset_all_state();
   configure_fan_pwm();
 
+  // control the status LED builtin to the particle
+  RGB.control(true);
+
   // initialize the LED pins as an output:
   pinMode(LED_STATUS_PIN, OUTPUT);      
-  pinMode(SECONDARY_STATUS_LED_PIN, OUTPUT);      
   // initialize the sensor pin as an input:
   pinMode(BREAKBEAM_PIN, INPUT);     
   digitalWrite(BREAKBEAM_PIN, HIGH); // turn on the pullup
   digitalWrite(LED_STATUS_PIN, LOW); // turn off LED to start
-  digitalWrite(SECONDARY_STATUS_LED_PIN, LOW);      
 
   Serial.begin(9600);
 }
@@ -102,13 +143,6 @@ void read_breakbeam_state(){
     // the state change occurred later to determine timer countdown
     breakbeam_last_change_time = tnow;
   } 
-
-  if (breakbeam_state == IR_STATE_BROKEN && breakbeam_last_state != IR_STATE_BROKEN) {
-    Serial.println("Occupied");
-  } 
-  if (breakbeam_state == IR_STATE_UNBROKEN && breakbeam_last_state != IR_STATE_UNBROKEN) {
-    Serial.println("Vacant");
-  }
 }
 
 void reset_all_state(){
@@ -120,7 +154,7 @@ void reset_all_state(){
   fan_enable_time_ms = state_time_ms;
   state_change(HOUSE_STATE_VACANT);
   previous_state = state;
-
+  Serial.println(String(state_time_ms) + " !!! RESET !!!");
   return;
 }
 
@@ -133,9 +167,11 @@ void set_fan_mode(){
 
 void set_status_leds() {
   if (state == HOUSE_STATE_COOLDOWN) {
-    digitalWrite(SECONDARY_STATUS_LED_PIN, HIGH);
+    RGB.color(0,0,255); // blue cooldown
+  } else if (state == HOUSE_STATE_OCCUPIED) {
+    RGB.color(0,255,0); // green occupied
   } else {
-    digitalWrite(SECONDARY_STATUS_LED_PIN, LOW);
+    RGB.color(0,0,0); // black vacant
   }
 
   // check if the sensor beam is broken
@@ -150,50 +186,14 @@ void set_status_leds() {
 // put it all together
 void loop(){
   unsigned long tnow = millis();
-  // handle time overflow and reset
-  if (tnow < breakbeam_last_change_time) {
-    // reset all timers
-    reset_all_state();
-    // skip this iteration
-    return;
-  }
 
   // TODO: move this to interrupt
   read_breakbeam_state();
 
-  // based on breakbeam state, and timing of fan_enabled_time_ms, set state
-  previous_state = state;
   if (breakbeam_state == IR_STATE_BROKEN) {
     state_change(HOUSE_STATE_OCCUPIED);
   } else if (breakbeam_state == IR_STATE_UNBROKEN && state == HOUSE_STATE_OCCUPIED) {
     state_change(HOUSE_STATE_COOLDOWN);
-  } else {
-    state_change(HOUSE_STATE_VACANT);
-  }
-
-  switch (state) {
-    case HOUSE_STATE_VACANT:
-      if (previous_state != HOUSE_STATE_VACANT) {
-        Serial.println("Vacant");
-      }
-      break;
-    case HOUSE_STATE_OCCUPIED:
-      if (previous_state != HOUSE_STATE_OCCUPIED) {
-        Serial.println("Occupied");
-      }
-      break;
-    case HOUSE_STATE_COOLDOWN:
-      if (previous_state == HOUSE_STATE_OCCUPIED) {
-        Serial.println("Unoccupied - cooldown started");
-      } else if (tnow > state_time_ms + COOLDOWN_MS) {
-        Serial.println("Unoccupied - cooldown completed");
-        state_change(HOUSE_STATE_VACANT);
-      }
-      break;
-    default:
-      Serial.println("Unknown status - resetting state");
-      reset_all_state();
-      break;
   }
 
   switch (state) {
@@ -205,6 +205,11 @@ void loop(){
       break;
     case HOUSE_STATE_COOLDOWN:
       fan_state_change(FAN_STATE_COOLDOWN);
+
+      if (tnow > state_time_ms + COOLDOWN_MS) {
+        Serial.println("Unoccupied - cooldown completed");
+        state_change(HOUSE_STATE_VACANT);
+      }
       break;
   }
 
@@ -223,6 +228,7 @@ void loop(){
   // set LED status based on occupied state
   set_status_leds();
 
-  //sleep TODO
-  delay(10);
+  //print_state("<--");
+
+  delay(100);
 }
