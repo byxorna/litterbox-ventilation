@@ -18,3 +18,35 @@ xx todo
 # Software
 
 xx todo
+
+# Build
+
+```
+$ make build
+particle cloud compile xenon project.properties src/litterbox-ventilation --target 1.5.2 --saveTo firmware.bin
+
+Compiling code for xenon
+Targeting version: 1.5.2
+
+Including:
+    project.properties
+    src/litterbox-ventilation/litterbox-ventilation.ino
+
+attempting to compile firmware
+downloading binary from: /v1/binaries/5f009ecce674958f35eef72a
+saving to: firmware.bin
+Memory use:
+   text    data     bss     dec     hex filename
+   9384     112    1100   10596    2964 /workspace/target/workspace.elf
+
+Compile succeeded.
+Saved firmware to: /Users/gabe/code/litterbox-ventilation/firmware.bin
+```
+
+# Flashing
+
+```
+# put device in DFU mode
+$ make flash
+...
+```

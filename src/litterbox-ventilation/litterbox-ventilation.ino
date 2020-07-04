@@ -14,7 +14,10 @@ SYSTEM_MODE(MANUAL);
 // internal blue LED on Particle, indicates breakbeam status
 #define LED_STATUS_PIN D7
 #define BREAKBEAM_PIN D4
-#define FAN_PWM_PIN D5
+#define FAN_PWM_PIN A4
+#define BATTERY_STATUS_UPDATE_INTERVAL_MS 15000
+#define NFC_ENABLE 0
+#define NFC_UPDATE_INTERVAL_MS 1000
 
 // how long to run the fan after the litterbox is not occupied for cleanup
 #define COOLDOWN_MS 20000
@@ -38,6 +41,10 @@ enum FanState {
   FAN_STATE_ON,
   FAN_STATE_COOLDOWN
 };
+
+float battVoltage = 0.0;
+unsigned long battVoltageLastUpdate = 0;
+unsigned long nfcLastUpdate = 0;
 
 BreakbeamState breakbeam_state = IR_STATE_UNBROKEN;
 BreakbeamState breakbeam_last_state = breakbeam_state;
@@ -111,10 +118,10 @@ void print_state(String prefix) {
 
 void setup() {
   reset_all_state();
-  configure_fan_pwm();
-
   // control the status LED builtin to the particle
   RGB.control(true);
+
+  NFC.on(); // advertise stuff over NFC
 
   // initialize the LED pins as an output:
   pinMode(LED_STATUS_PIN, OUTPUT);      
@@ -122,6 +129,8 @@ void setup() {
   pinMode(BREAKBEAM_PIN, INPUT);     
   digitalWrite(BREAKBEAM_PIN, HIGH); // turn on the pullup
   digitalWrite(LED_STATUS_PIN, LOW); // turn off LED to start
+
+  collect_battery_status();
 
   Serial.begin(9600);
 }
@@ -158,11 +167,12 @@ void reset_all_state(){
   return;
 }
 
-void configure_fan_pwm(){
-}
-
 void set_fan_mode(){
   // https://arduino.stackexchange.com/questions/25609/set-pwm-frequency-to-25-khz/25623#25623
+  // https://docs.particle.io/reference/device-os/firmware/photon/#sts=analogWrite()%20(PWM)
+  // TODO: seems the particle can only do PWM at a fixed 500hz cycle. Fans need 25khz. Fuck.
+  // looking into power relays instead...
+  //analogWrite(FAN_PWM_PIN, 0, 
 }
 
 void set_status_leds() {
@@ -183,9 +193,67 @@ void set_status_leds() {
   }
 }
 
+void advertise_nfc_state(){
+#if NFC_ENABLE
+  if (millis() - nfcLastUpdate >= NFC_UPDATE_INTERVAL_MS) {
+    String house;
+    String oldhouse;
+    String ir;
+    String fan;
+    if (previous_state == HOUSE_STATE_VACANT){
+      oldhouse = "house_vacant";
+    } else if (previous_state == HOUSE_STATE_OCCUPIED){
+      oldhouse = "house_occupied";
+    } else {
+      oldhouse = "house_cooldown";
+    }
+    if (state == HOUSE_STATE_VACANT){
+      house = "house_vacant";
+    } else if (state == HOUSE_STATE_OCCUPIED){
+      house = "house_occupied";
+    } else {
+      house = "house_cooldown";
+    }
+    if (fan_state == FAN_STATE_ON){
+      fan = "fan_on";
+    } else if (fan_state == FAN_STATE_OFF){
+      fan = "fan_off";
+    } else {
+      fan = "fan_cooldown";
+    }
+
+    if (breakbeam_state == IR_STATE_BROKEN){
+      ir = "ir_broken";
+    } else {
+      ir = "ir_connected";
+    }
+
+    String t = "";
+    if (state != HOUSE_STATE_VACANT) {
+      t = String(millis()-state_time_ms);
+    }
+
+    NFC.setText(house + "(" + oldhouse + ") | " + ir + " | " + fan + " (Battery:" + String(battVoltage, 2) + "%)");
+    nfcLastUpdate = millis();
+    NFC.update();
+  }
+#endif
+}
+
+void collect_battery_status(){
+    // collect battery status periodically, so we can try to advertise % back through NFC/BLE
+    // https://blog.particle.io/get-started-with-ble-and-nfc/
+    if (millis() - battVoltageLastUpdate >= BATTERY_STATUS_UPDATE_INTERVAL_MS) {
+      battVoltageLastUpdate = millis();
+      battVoltage = analogRead(BATT) * 0.0011224 / 4.7 * 100;
+    }
+}
+
 // put it all together
 void loop(){
   unsigned long tnow = millis();
+
+  collect_battery_status();
 
   // TODO: move this to interrupt
   read_breakbeam_state();
@@ -229,6 +297,8 @@ void loop(){
   set_status_leds();
 
   //print_state("<--");
+
+  advertise_nfc_state();
 
   delay(100);
 }

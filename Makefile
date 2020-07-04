@@ -2,7 +2,7 @@
 FIRMWARE = firmware.bin
 # https://docs.particle.io/reference/discontinued/mesh/ 
 TARGET = 1.5.2
-PROJECT ?= sensor-test
+PROJECT ?= litterbox-ventilation
 DEVICE ?= xenon
 
 deps:
