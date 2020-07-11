@@ -13,8 +13,8 @@ SYSTEM_MODE(MANUAL);
 
 // internal blue LED on Particle, indicates breakbeam status
 #define LED_STATUS_PIN D7
-#define BREAKBEAM_PIN D4
-#define FAN_PWM_PIN A4
+#define BREAKBEAM_PIN D6
+#define FAN_PIN D5
 #define BATTERY_STATUS_UPDATE_INTERVAL_MS 15000
 #define NFC_ENABLE 0
 #define NFC_UPDATE_INTERVAL_MS 1000
@@ -127,8 +127,10 @@ void setup() {
   pinMode(LED_STATUS_PIN, OUTPUT);      
   // initialize the sensor pin as an input:
   pinMode(BREAKBEAM_PIN, INPUT);     
+  pinMode(FAN_PIN, OUTPUT); // this is the mosfet driving the fan
   digitalWrite(BREAKBEAM_PIN, HIGH); // turn on the pullup
   digitalWrite(LED_STATUS_PIN, LOW); // turn off LED to start
+  digitalWrite(FAN_PIN, LOW); // turn off fan mosfet to start
 
   collect_battery_status();
 
@@ -168,16 +170,16 @@ void reset_all_state(){
 }
 
 void set_fan_mode(){
-  // https://arduino.stackexchange.com/questions/25609/set-pwm-frequency-to-25-khz/25623#25623
-  // https://docs.particle.io/reference/device-os/firmware/photon/#sts=analogWrite()%20(PWM)
-  // TODO: seems the particle can only do PWM at a fixed 500hz cycle. Fans need 25khz. Fuck.
-  // looking into power relays instead...
-  //analogWrite(FAN_PWM_PIN, 0, 
+  if (fan_state == FAN_STATE_OFF) {
+    digitalWrite(FAN_PIN, LOW);
+  } else {
+    digitalWrite(FAN_PIN, HIGH);
+  }
 }
 
 void set_status_leds() {
   if (state == HOUSE_STATE_COOLDOWN) {
-    RGB.color(0,0,255); // blue cooldown
+    RGB.color(255,0,0); // red cooldown
   } else if (state == HOUSE_STATE_OCCUPIED) {
     RGB.color(0,255,0); // green occupied
   } else {
@@ -186,6 +188,7 @@ void set_status_leds() {
 
   // check if the sensor beam is broken
   // if it is, the breakbeam_state is LOW:
+  // this writes to the internal D7 LED that is blue
   if (breakbeam_state == IR_STATE_BROKEN) {
     digitalWrite(LED_STATUS_PIN, HIGH);
   } else {
